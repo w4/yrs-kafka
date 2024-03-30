@@ -1,0 +1,28 @@
+[package]
+name = "yrs-kafka"
+description = "Yrs synchronization and persistence using RocksDB & Kafka"
+version = "0.1.0"
+edition = "2021"
+license = "WTFPL"
+repository = "https://github.com/w4/yrs-kafka"
+keywords = ["yrs", "kafka", "rocksdb", "crdt", "persistence"]
+categories = ["database"]
+authors = ["Jordan Doyle <jordan@doyle.la>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3"
+log = "0.4"
+rand = "0.8"
+rdkafka = { version = "0.36", features = ["tokio"] }
+rocksdb = "0.22"
+thiserror = "1.0"
+tokio = { version = "1.37", features = ["sync"] }
+uuid = { version = "1.8", features = ["v4"] }
+yrs = "0.18"
+
+[dev-dependencies]
+testcontainers = "0.15"
+tempfile = "3.10"
+tokio = { version = "1.37", features = ["full"] }
