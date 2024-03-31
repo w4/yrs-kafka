@@ -250,7 +250,10 @@ impl YrsKafka {
         let rocksdb = Arc::new(
             rocksdb::DB::open(&rocksdb_options, &config.path).map_err(InitError::OpenRocksDb)?,
         );
-        let producer = rdkafka::producer::FutureProducer::from_config(&config.kafka.clone().into())
+
+        let mut kafka_config: ClientConfig = config.kafka.clone().into();
+        kafka_config.remove("group.id");
+        let producer = rdkafka::producer::FutureProducer::from_config(&kafka_config)
             .map_err(InitError::CreateProducer)?;
 
         Ok(Self {
