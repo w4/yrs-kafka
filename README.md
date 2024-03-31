@@ -1,4 +1,4 @@
-# yrs-kafka
+# yrs-kafka [![Crate](https://img.shields.io/crates/v/yrs-kafka.svg)](https://crates.io/crates/yrs-kafka) [![API](https://docs.rs/yrs-kafka/badge.svg)](https://docs.rs/yrs-kafka) [![codecov](https://codecov.io/github/w4/yrs-kafka/branch/master/graph/badge.svg?token=4UGDI57H5K)](https://codecov.io/github/w4/yrs-kafka)
 
 [Yrs] synchronization and persistence using Kafka and an ephemeral RocksDB instance fed by a
 compacted topic.
