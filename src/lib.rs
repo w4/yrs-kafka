@@ -62,8 +62,6 @@ use crate::{
     yoked::PinnableSlice,
 };
 
-const CHANGELOG: &str = "yjs-changelog";
-const COMPACTED: &str = "yjs-compacted";
 const INSTANCE_ID_HEADER: &str = "instance-id";
 
 pub struct YrsKafkaRunning {
@@ -110,16 +108,17 @@ pub fn start(config: Config) -> Result<YrsKafkaRunning, InitError> {
 
 /// Reads the compacted topic of documents.
 async fn read_compacted_topic(config: Config, store: YrsKafka) -> Result<(), InternalError> {
-    let mut config = ClientConfig::from(config.kafka);
-    config.set("group.id", Uuid::new_v4());
-    config.set("enable.auto.commit", "false");
-    config.set("enable.auto.offset.store", "false");
-    config.set("auto.offset.reset", "earliest");
+    let mut kafka_config = ClientConfig::from(config.kafka.clone());
+    kafka_config.set("group.id", Uuid::new_v4());
+    kafka_config.set("enable.auto.commit", "false");
+    kafka_config.set("enable.auto.offset.store", "false");
+    kafka_config.set("auto.offset.reset", "earliest");
 
-    let stream = StreamConsumer::<DefaultConsumerContext, DefaultRuntime>::from_config(&config)
-        .map_err(InternalError::TopicReader)?;
+    let stream =
+        StreamConsumer::<DefaultConsumerContext, DefaultRuntime>::from_config(&kafka_config)
+            .map_err(InternalError::TopicReader)?;
     stream
-        .subscribe(&[COMPACTED])
+        .subscribe(&[&config.kafka.compacted_topic])
         .map_err(InternalError::TopicSubscribe)?;
 
     loop {
@@ -166,11 +165,12 @@ async fn read_compacted_topic(config: Config, store: YrsKafka) -> Result<(), Int
 /// relevant document, after which the document is serialised and written
 /// to the compacted topic to be read by other instances.
 async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), InternalError> {
-    let stream =
-        StreamConsumer::<DefaultConsumerContext, DefaultRuntime>::from_config(&config.kafka.into())
-            .map_err(InternalError::TopicReader)?;
+    let stream = StreamConsumer::<DefaultConsumerContext, DefaultRuntime>::from_config(
+        &config.kafka.clone().into(),
+    )
+    .map_err(InternalError::TopicReader)?;
     stream
-        .subscribe(&[CHANGELOG])
+        .subscribe(&[&config.kafka.changelog_topic])
         .map_err(InternalError::TopicSubscribe)?;
 
     loop {
@@ -207,7 +207,7 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
 
         // send the change to the compacted topic for other instances
         // to read into their store
-        let record = FutureRecord::to(COMPACTED)
+        let record = FutureRecord::to(&config.kafka.compacted_topic)
             .key(key)
             .headers(OwnedHeaders::new().insert(Header {
                 key: INSTANCE_ID_HEADER,
@@ -232,6 +232,7 @@ pub struct YrsKafka {
     rocksdb: Arc<rocksdb::DB>,
     producer: rdkafka::producer::FutureProducer,
     document_changed: broadcast::Sender<Arc<[u8]>>,
+    changelog_topic: Arc<str>,
 }
 
 impl YrsKafka {
@@ -257,6 +258,7 @@ impl YrsKafka {
             rocksdb,
             producer,
             document_changed: broadcast::channel(10).0,
+            changelog_topic: Arc::from(config.kafka.changelog_topic.to_string()),
         })
     }
 
@@ -274,7 +276,9 @@ impl YrsKafka {
     ///
     /// Returns an error if the changelog couldn't be written to.
     pub async fn update(&self, id: &[u8], payload: Vec<u8>) -> Result<(), Error> {
-        let record = FutureRecord::to(CHANGELOG).key(id).payload(&payload);
+        let record = FutureRecord::to(&self.changelog_topic)
+            .key(id)
+            .payload(&payload);
 
         self.producer
             .send(record, Timeout::After(Duration::from_secs(1)))

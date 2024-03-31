@@ -10,10 +10,7 @@ use testcontainers::{
 use uuid::Uuid;
 use yrs::{updates::decoder::Decode, Doc, GetString, Text, Transact, Update};
 
-use crate::{
-    config::{Config, KafkaConfig},
-    CHANGELOG, COMPACTED,
-};
+use crate::config::{Config, KafkaConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test() {
@@ -30,12 +27,14 @@ async fn updates_originating_from_current_instance() {
     let container = docker.run(RedpandaContainer::latest());
     let temp_dir = tempfile::tempdir().unwrap();
 
-    container.exec(RedpandaContainer::cmd_create_topic(CHANGELOG, 1));
-    container.exec(RedpandaContainer::cmd_create_topic(COMPACTED, 1));
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-changelog", 1));
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-compacted", 1));
 
     let kafka_config = KafkaConfig {
         brokers: vec![format!("localhost:{}", container.get_host_port_ipv4(9092))],
         group_id: Uuid::new_v4().to_string(),
+        compacted_topic: "yjs-compacted".to_string(),
+        changelog_topic: "yrs-changelog".to_string(),
     };
 
     let y = crate::start(Config {
@@ -99,12 +98,14 @@ async fn updates_originating_from_other_instance() {
     let docker = clients::Cli::new::<env::Os>();
     let container = docker.run(RedpandaContainer::latest());
 
-    container.exec(RedpandaContainer::cmd_create_topic(CHANGELOG, 1));
-    container.exec(RedpandaContainer::cmd_create_topic(COMPACTED, 1));
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-changelog", 1));
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-compacted", 1));
 
     let kafka_config = KafkaConfig {
         brokers: vec![format!("localhost:{}", container.get_host_port_ipv4(9092))],
         group_id: Uuid::new_v4().to_string(),
+        changelog_topic: "yjs-changelog".to_string(),
+        compacted_topic: "yjs-compacted".to_string(),
     };
 
     let temp_dir1 = tempfile::tempdir().unwrap();

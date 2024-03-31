@@ -12,6 +12,8 @@ pub struct Config {
 pub struct KafkaConfig {
     pub brokers: Vec<String>,
     pub group_id: String,
+    pub changelog_topic: String,
+    pub compacted_topic: String,
 }
 
 impl From<KafkaConfig> for ClientConfig {
