@@ -38,7 +38,7 @@ async fn updates_originating_from_current_instance() {
     };
 
     let y = crate::start(Config {
-        path: temp_dir.path().to_path_buf(),
+        db_path: temp_dir.path().to_path_buf(),
         kafka: kafka_config,
     })
     .unwrap();
@@ -110,14 +110,14 @@ async fn updates_originating_from_other_instance() {
 
     let temp_dir1 = tempfile::tempdir().unwrap();
     let y1 = crate::start(Config {
-        path: temp_dir1.path().to_path_buf(),
+        db_path: temp_dir1.path().to_path_buf(),
         kafka: kafka_config.clone(),
     })
     .unwrap();
 
     let temp_dir2 = tempfile::tempdir().unwrap();
     let y2 = crate::start(Config {
-        path: temp_dir2.path().to_path_buf(),
+        db_path: temp_dir2.path().to_path_buf(),
         kafka: kafka_config,
     })
     .unwrap();

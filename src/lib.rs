@@ -248,7 +248,7 @@ impl YrsKafka {
         });
 
         let rocksdb = Arc::new(
-            rocksdb::DB::open(&rocksdb_options, &config.path).map_err(InitError::OpenRocksDb)?,
+            rocksdb::DB::open(&rocksdb_options, &config.db_path).map_err(InitError::OpenRocksDb)?,
         );
 
         let mut kafka_config: ClientConfig = config.kafka.clone().into();

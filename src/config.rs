@@ -4,7 +4,7 @@ use rdkafka::ClientConfig;
 
 #[derive(Clone)]
 pub struct Config {
-    pub path: PathBuf,
+    pub db_path: PathBuf,
     pub kafka: KafkaConfig,
 }
 
