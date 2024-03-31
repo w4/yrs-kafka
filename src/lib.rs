@@ -24,7 +24,9 @@
 )]
 #![allow(clippy::multiple_crate_versions, clippy::module_name_repetitions)]
 
+/// Configuration for [`start`].
 pub mod config;
+/// Errors exposed by `yrs-kafka`.
 pub mod error;
 #[cfg(test)]
 mod test;
@@ -64,9 +66,13 @@ use crate::{
 
 const INSTANCE_ID_HEADER: &str = "instance-id";
 
+/// Represents a running instance of `YrsKafka` along with its background
+/// tasks.
+#[derive(Clone)]
+#[allow(dead_code)]
 pub struct YrsKafkaRunning {
-    pub inner: YrsKafka,
-    pub tasks: JoinSet<()>,
+    inner: YrsKafka,
+    tasks: Arc<JoinSet<()>>,
 }
 
 impl Deref for YrsKafkaRunning {
@@ -102,7 +108,7 @@ pub fn start(config: Config) -> Result<YrsKafkaRunning, InitError> {
 
     Ok(YrsKafkaRunning {
         inner: store,
-        tasks: join_set,
+        tasks: Arc::new(join_set),
     })
 }
 
@@ -226,6 +232,7 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
     }
 }
 
+/// Main interface of `yrs-kafka`.
 #[derive(Clone)]
 pub struct YrsKafka {
     instance_id: Uuid,
@@ -323,6 +330,7 @@ impl YrsKafka {
     }
 }
 
+/// [Yoked][yoke] data structures exposed by `yrs-kafka`.
 #[allow(clippy::mem_forget)]
 pub mod yoked {
     use std::ops::Deref;
@@ -330,6 +338,8 @@ pub mod yoked {
     use rocksdb::DBPinnableSlice;
     use yoke::Yokeable;
 
+    /// Holds a value from `RocksDB` within a `PinnableSlice` to avoid
+    /// unnecessary memcpys.
     #[derive(Yokeable)]
     pub struct PinnableSlice<'a>(pub(crate) DBPinnableSlice<'a>);
 
@@ -342,6 +352,8 @@ pub mod yoked {
     }
 }
 
+/// Non-returning function that restarts `func` whenever it returns
+/// unexpectedly, with an exponential backoff.
 async fn watchdog<F>(
     kind: &str,
     func: impl Fn(Config, YrsKafka) -> F + Send,
@@ -374,7 +386,7 @@ async fn watchdog<F>(
             .min(120.0);
         let next_try = Duration::from_secs_f32(next_try);
 
-        eprintln!("{kind} consumer has unexpectedly shutdown with output {res:?}, restarting in {next_try:?}");
+        error!("{kind} consumer has unexpectedly shutdown with output {res:?}, restarting in {next_try:?}");
         tokio::time::sleep(next_try).await;
     }
 }
