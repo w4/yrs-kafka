@@ -14,6 +14,8 @@ pub enum Error {
     SendProducer(rdkafka::error::KafkaError),
     #[error("failed to read state from rocksdb: {0}")]
     ReadRocksDb(rocksdb::Error),
+    #[error("failed to join on spawned task: {0}")]
+    SpawnBlocking(tokio::task::JoinError),
 }
 
 #[derive(Error, Debug)]

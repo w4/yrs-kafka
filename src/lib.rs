@@ -50,6 +50,7 @@ use rdkafka::{
 };
 use tokio::{sync::broadcast, task::JoinSet, time::Instant};
 use uuid::Uuid;
+use yoke::Yoke;
 use yrs::{
     updates::{decoder::Decode, encoder::Encode},
     Update,
@@ -257,6 +258,8 @@ impl YrsKafka {
 
         if let Err(e) = self.rocksdb.merge(id, payload) {
             error!("Failed to update local state: {e}");
+        } else {
+            let _res = self.document_changed.send(id.into());
         }
 
         Ok(())
@@ -268,8 +271,42 @@ impl YrsKafka {
     /// # Errors
     ///
     /// Returns an error if the `RocksDB` read fails.
-    pub fn read_updates(&self, id: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        self.rocksdb.get(id).map_err(Error::ReadRocksDb)
+    pub async fn load_document(
+        &self,
+        id: impl Into<Vec<u8>> + Send,
+    ) -> Result<Yoke<Option<yoked::PinnableSlice<'static>>, Arc<rocksdb::DB>>, Error> {
+        let rocksdb = self.rocksdb.clone();
+        let id = id.into();
+
+        tokio::task::spawn_blocking(move || {
+            Yoke::try_attach_to_cart(rocksdb, |v| {
+                Ok(v.get_pinned(id)
+                    .map_err(Error::ReadRocksDb)?
+                    .map(yoked::PinnableSlice))
+            })
+        })
+        .await
+        .map_err(Error::SpawnBlocking)
+        .and_then(std::convert::identity)
+    }
+}
+
+#[allow(clippy::mem_forget)]
+pub mod yoked {
+    use std::ops::Deref;
+
+    use rocksdb::DBPinnableSlice;
+    use yoke::Yokeable;
+
+    #[derive(Yokeable)]
+    pub struct PinnableSlice<'a>(pub(crate) DBPinnableSlice<'a>);
+
+    impl<'a> Deref for PinnableSlice<'a> {
+        type Target = DBPinnableSlice<'a>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
     }
 }
 

@@ -61,10 +61,11 @@ async fn updates_originating_from_current_instance() {
     let changed_key = recv.recv().await.unwrap();
     assert_eq!(changed_key.as_ref(), b"my-document");
 
-    let updates = y.read_updates(b"my-document").unwrap().unwrap();
+    let updates = y.load_document(b"my-document").await.unwrap();
+    let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates).unwrap());
+        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
     assert_eq!(
         doc.get_or_insert_text("article")
             .get_string(&doc.transact()),
@@ -81,10 +82,12 @@ async fn updates_originating_from_current_instance() {
     let changed_key = recv.recv().await.unwrap();
     assert_eq!(changed_key.as_ref(), b"my-document");
 
-    let updates = y.read_updates(b"my-document").unwrap().unwrap();
+    let updates = y.load_document(b"my-document").await.unwrap();
+    let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates).unwrap());
+        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
+
     assert_eq!(
         doc.get_or_insert_text("article")
             .get_string(&doc.transact()),
@@ -136,10 +139,11 @@ async fn updates_originating_from_other_instance() {
     let changed_key = recv.recv().await.unwrap();
     assert_eq!(changed_key.as_ref(), b"my-document");
 
-    let updates = y2.read_updates(b"my-document").unwrap().unwrap();
+    let updates = y2.load_document(b"my-document").await.unwrap();
+    let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates).unwrap());
+        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
     assert_eq!(
         doc.get_or_insert_text("article")
             .get_string(&doc.transact()),
