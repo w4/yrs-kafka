@@ -28,6 +28,8 @@ pub(super) enum InternalError {
     ReadTopic(rdkafka::error::KafkaError),
     #[error("failed to merge update into rocksdb store: {0}")]
     MergeUpdate(rocksdb::Error),
+    #[error("failed to join on tokio task: {0}")]
+    Join(tokio::task::JoinError),
     #[error("failed to read from rocksdb store after merge: {0}")]
     ReadAfterMerge(rocksdb::Error),
     #[error("bad state, data being unavailable after rocksdb merge")]

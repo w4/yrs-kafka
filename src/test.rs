@@ -65,7 +65,7 @@ async fn updates_originating_from_current_instance() {
     let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
+        .apply_update(Update::decode_v1(updates.as_ref()).unwrap());
     assert_eq!(
         doc.get_or_insert_text("article")
             .get_string(&doc.transact()),
@@ -86,7 +86,7 @@ async fn updates_originating_from_current_instance() {
     let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
+        .apply_update(Update::decode_v1(updates.as_ref()).unwrap());
 
     assert_eq!(
         doc.get_or_insert_text("article")
@@ -143,7 +143,7 @@ async fn updates_originating_from_other_instance() {
     let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
-        .apply_update(Update::decode_v1(&updates.as_ref()).unwrap());
+        .apply_update(Update::decode_v1(updates.as_ref()).unwrap());
     assert_eq!(
         doc.get_or_insert_text("article")
             .get_string(&doc.transact()),

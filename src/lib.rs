@@ -59,6 +59,7 @@ use yrs::{
 use crate::{
     config::Config,
     error::{Error, InitError, InternalError},
+    yoked::PinnableSlice,
 };
 
 const CHANGELOG: &str = "yjs-changelog";
@@ -141,10 +142,17 @@ async fn read_compacted_topic(config: Config, store: YrsKafka) -> Result<(), Int
             continue;
         };
 
-        store
-            .rocksdb
-            .merge(key, payload)
-            .map_err(InternalError::MergeUpdate)?;
+        let key_copy = Box::from(key);
+        let payload = Box::from(payload);
+        let rocksdb = store.rocksdb.clone();
+
+        tokio::task::spawn_blocking(move || {
+            rocksdb
+                .merge(key_copy, payload)
+                .map_err(InternalError::MergeUpdate)
+        })
+        .await
+        .map_err(InternalError::Join)??;
 
         let _res = store.document_changed.send(key.into());
     }
@@ -172,17 +180,27 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
             continue;
         };
 
+        let rocksdb = store.rocksdb.clone();
+        let key_copy = Box::from(key);
+        let payload = Box::from(payload);
+
         // merge the change into our source of truth and read it back for pushing
         // into the compacted topic
-        store
-            .rocksdb
-            .merge(key, payload)
-            .map_err(InternalError::MergeUpdate)?;
-        let value = store
-            .rocksdb
-            .get(key)
-            .map_err(InternalError::ReadAfterMerge)?
-            .ok_or(InternalError::MissingUnexpected)?;
+        let value: Yoke<PinnableSlice<'static>, _> = tokio::task::spawn_blocking(move || {
+            rocksdb
+                .merge(&key_copy, payload)
+                .map_err(InternalError::MergeUpdate)?;
+
+            Yoke::try_attach_to_cart(rocksdb, |v| {
+                v.get_pinned(&key_copy)
+                    .map_err(InternalError::ReadAfterMerge)?
+                    .map(yoked::PinnableSlice)
+                    .ok_or(InternalError::MissingUnexpected)
+            })
+        })
+        .await
+        .map_err(InternalError::Join)??;
+        let value = value.get();
 
         // return the doc change event to all subscribers in the consumer
         let _res = store.document_changed.send(key.into());
@@ -195,7 +213,7 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
                 key: INSTANCE_ID_HEADER,
                 value: Some(&store.instance_id.as_u128().to_be_bytes()),
             }))
-            .payload(&value);
+            .payload(value.as_ref());
         store
             .producer
             .send(record, Timeout::After(Duration::from_secs(1)))
@@ -240,6 +258,13 @@ impl YrsKafka {
             producer,
             document_changed: broadcast::channel(10).0,
         })
+    }
+
+    /// Subscribes to all received document changes, yielding the changed
+    /// document's key.
+    #[must_use]
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<[u8]>> {
+        self.document_changed.subscribe()
     }
 
     /// Pushes an update for a document with the given `id` to the changelog
