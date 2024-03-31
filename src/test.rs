@@ -2,6 +2,12 @@
 
 use std::time::Duration;
 
+use rdkafka::{
+    config::FromClientConfig,
+    message::{Header, OwnedHeaders},
+    producer::FutureRecord,
+    util::{DefaultRuntime, Timeout},
+};
 use testcontainers::{
     clients,
     core::{env, ExecCommand, WaitFor},
@@ -10,7 +16,10 @@ use testcontainers::{
 use uuid::Uuid;
 use yrs::{updates::decoder::Decode, Doc, GetString, Text, Transact, Update};
 
-use crate::config::{Config, KafkaConfig};
+use crate::{
+    config::{Config, KafkaConfig},
+    INSTANCE_ID_HEADER,
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test() {
@@ -20,6 +29,8 @@ async fn test() {
     updates_originating_from_current_instance().await;
     eprintln!("running updates_originating_from_other_instance");
     updates_originating_from_other_instance().await;
+    eprintln!("running updates_originating_from_compacted_topic");
+    updates_originating_from_compacted_topic().await;
 }
 
 async fn updates_originating_from_current_instance() {
@@ -45,7 +56,7 @@ async fn updates_originating_from_current_instance() {
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let mut recv = y.document_changed.subscribe();
+    let mut recv = y.subscribe();
 
     let doc = Doc::new();
     let text = doc.get_or_insert_text("article");
@@ -124,7 +135,7 @@ async fn updates_originating_from_other_instance() {
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let mut recv = y2.document_changed.subscribe();
+    let mut recv = y2.subscribe();
 
     let doc = Doc::new();
     let text = doc.get_or_insert_text("article");
@@ -141,6 +152,66 @@ async fn updates_originating_from_other_instance() {
     assert_eq!(changed_key.as_ref(), b"my-document");
 
     let updates = y2.load_document(b"my-document").await.unwrap();
+    let updates = updates.get().as_ref().unwrap();
+    let doc = Doc::new();
+    doc.transact_mut()
+        .apply_update(Update::decode_v1(updates.as_ref()).unwrap());
+    assert_eq!(
+        doc.get_or_insert_text("article")
+            .get_string(&doc.transact()),
+        "hello world"
+    );
+}
+
+async fn updates_originating_from_compacted_topic() {
+    let docker = clients::Cli::new::<env::Os>();
+    let container = docker.run(RedpandaContainer::latest());
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-changelog", 1));
+    container.exec(RedpandaContainer::cmd_create_topic("yjs-compacted", 1));
+
+    let kafka_config = KafkaConfig {
+        brokers: vec![format!("localhost:{}", container.get_host_port_ipv4(9092))],
+        group_id: Uuid::new_v4().to_string(),
+        compacted_topic: "yjs-compacted".to_string(),
+        changelog_topic: "yrs-changelog".to_string(),
+    };
+
+    let payload = {
+        let doc = Doc::new();
+        let text = doc.get_or_insert_text("article");
+
+        let mut txn = doc.transact_mut();
+        text.insert(&mut txn, 0, "hello");
+        text.insert(&mut txn, 5, " world");
+        txn.encode_update_v1()
+    };
+
+    let producer = rdkafka::producer::FutureProducer::<_, DefaultRuntime>::from_config(
+        &kafka_config.clone().into(),
+    )
+    .unwrap();
+    let record = FutureRecord::to("yjs-compacted")
+        .key(b"my-document")
+        .headers(OwnedHeaders::new().insert(Header {
+            key: INSTANCE_ID_HEADER,
+            value: Some(b"test"),
+        }))
+        .payload(&payload);
+    producer.send(record, Timeout::Never).await.unwrap();
+
+    let y = crate::start(Config {
+        db_path: temp_dir.path().to_path_buf(),
+        kafka: kafka_config,
+    })
+    .unwrap();
+
+    let mut recv = y.subscribe();
+    let changed_key = recv.recv().await.unwrap();
+    assert_eq!(changed_key.as_ref(), b"my-document");
+
+    let updates = y.load_document(b"my-document").await.unwrap();
     let updates = updates.get().as_ref().unwrap();
     let doc = Doc::new();
     doc.transact_mut()
