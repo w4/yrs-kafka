@@ -58,7 +58,7 @@ use uuid::Uuid;
 use yoke::Yoke;
 use yrs::{
     updates::{decoder::Decode, encoder::Encode},
-    Update,
+    Doc, ReadTxn, Transact, Update,
 };
 
 pub use crate::notify_stream::NotifyStream;
@@ -268,11 +268,22 @@ impl YrsKafka {
         let mut rocksdb_options = rocksdb::Options::default();
         rocksdb_options.create_if_missing(true);
         rocksdb_options.set_merge_operator_associative("yjs", |_key, value, operands| {
-            let change_iter = value
-                .into_iter()
-                .chain(operands)
-                .map(|v| Update::decode_v1(v).expect("failed to decode update"));
-            Some(Update::merge_updates(change_iter).encode_v1())
+            let document = Doc::new();
+
+            {
+                let mut txn = document.transact_mut();
+
+                if let Some(change) = value {
+                    txn.apply_update(Update::decode_v1(change).expect("failed to decode update"));
+                }
+
+                for change in operands {
+                    txn.apply_update(Update::decode_v1(change).expect("failed to decode update"));
+                }
+            }
+
+            let res = Some(document.transact().store().encode_v1());
+            res
         });
 
         let rocksdb = Arc::new(
