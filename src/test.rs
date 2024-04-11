@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use futures::StreamExt;
 use rdkafka::{
     config::FromClientConfig,
     message::{Header, OwnedHeaders},
@@ -56,7 +57,7 @@ async fn updates_originating_from_current_instance() {
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let mut recv = y.subscribe();
+    let mut recv = y.subscribe(b"my-document");
 
     let doc = Doc::new();
     let text = doc.get_or_insert_text("article");
@@ -68,8 +69,7 @@ async fn updates_originating_from_current_instance() {
     };
 
     y.update(b"my-document", changes).await.unwrap();
-    let changed_key = recv.recv().await.unwrap();
-    assert_eq!(changed_key.as_ref(), b"my-document");
+    recv.next().await.unwrap();
 
     let updates = y.load_document(b"my-document").await.unwrap();
     let updates = updates.get().as_ref().unwrap();
@@ -89,8 +89,7 @@ async fn updates_originating_from_current_instance() {
     };
 
     y.update(b"my-document", changes).await.unwrap();
-    let changed_key = recv.recv().await.unwrap();
-    assert_eq!(changed_key.as_ref(), b"my-document");
+    recv.next().await.unwrap();
 
     let updates = y.load_document(b"my-document").await.unwrap();
     let updates = updates.get().as_ref().unwrap();
@@ -135,7 +134,7 @@ async fn updates_originating_from_other_instance() {
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let mut recv = y2.subscribe();
+    let mut recv = y2.subscribe(b"my-document");
 
     let doc = Doc::new();
     let text = doc.get_or_insert_text("article");
@@ -148,8 +147,7 @@ async fn updates_originating_from_other_instance() {
 
     y1.update(b"my-document", changes).await.unwrap();
 
-    let changed_key = recv.recv().await.unwrap();
-    assert_eq!(changed_key.as_ref(), b"my-document");
+    recv.next().await.unwrap();
 
     let updates = y2.load_document(b"my-document").await.unwrap();
     let updates = updates.get().as_ref().unwrap();
@@ -207,9 +205,8 @@ async fn updates_originating_from_compacted_topic() {
     })
     .unwrap();
 
-    let mut recv = y.subscribe();
-    let changed_key = recv.recv().await.unwrap();
-    assert_eq!(changed_key.as_ref(), b"my-document");
+    let mut recv = y.subscribe(b"my-document");
+    recv.next().await.unwrap();
 
     let updates = y.load_document(b"my-document").await.unwrap();
     let updates = updates.get().as_ref().unwrap();

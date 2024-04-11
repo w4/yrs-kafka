@@ -28,10 +28,12 @@
 pub mod config;
 /// Errors exposed by `yrs-kafka`.
 pub mod error;
+mod notify_stream;
 #[cfg(test)]
 mod test;
 
 use std::{
+    collections::HashMap,
     future::Future,
     ops::{Deref, Mul},
     panic::AssertUnwindSafe,
@@ -41,6 +43,7 @@ use std::{
 
 use futures::FutureExt;
 use log::error;
+use parking_lot::Mutex;
 use rand::Rng;
 use rdkafka::{
     config::FromClientConfig,
@@ -50,7 +53,7 @@ use rdkafka::{
     util::{DefaultRuntime, Timeout},
     ClientConfig, Message,
 };
-use tokio::{sync::broadcast, task::JoinSet, time::Instant};
+use tokio::{sync::Notify, task::JoinSet, time::Instant};
 use uuid::Uuid;
 use yoke::Yoke;
 use yrs::{
@@ -58,6 +61,7 @@ use yrs::{
     Update,
 };
 
+pub use crate::notify_stream::NotifyStream;
 use crate::{
     config::Config,
     error::{Error, InitError, InternalError},
@@ -159,7 +163,15 @@ async fn read_compacted_topic(config: Config, store: YrsKafka) -> Result<(), Int
         .await
         .map_err(InternalError::Join)??;
 
-        let _res = store.document_changed.send(key.into());
+        {
+            let mut document_state = store.document_updated.lock();
+
+            if let Some(subscribers) = document_state.get(key) {
+                subscribers.notify_waiters();
+            } else {
+                document_state.insert(key.into(), Arc::new(Notify::new()));
+            }
+        }
     }
 }
 
@@ -209,7 +221,15 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
         let value = value.get();
 
         // return the doc change event to all subscribers in the consumer
-        let _res = store.document_changed.send(key.into());
+        {
+            let mut document_state = store.document_updated.lock();
+
+            if let Some(subscribers) = document_state.get(key) {
+                subscribers.notify_waiters();
+            } else {
+                document_state.insert(key.into(), Arc::new(Notify::new()));
+            }
+        }
 
         // send the change to the compacted topic for other instances
         // to read into their store
@@ -234,11 +254,12 @@ async fn read_changelog_stream(config: Config, store: YrsKafka) -> Result<(), In
 
 /// Main interface of `yrs-kafka`.
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct YrsKafka {
     instance_id: Uuid,
     rocksdb: Arc<rocksdb::DB>,
     producer: rdkafka::producer::FutureProducer,
-    document_changed: broadcast::Sender<Arc<[u8]>>,
+    document_updated: Arc<Mutex<HashMap<Arc<[u8]>, Arc<Notify>>>>,
     changelog_topic: Arc<str>,
 }
 
@@ -267,16 +288,25 @@ impl YrsKafka {
             instance_id: Uuid::new_v4(),
             rocksdb,
             producer,
-            document_changed: broadcast::channel(10).0,
+            document_updated: Arc::new(Mutex::new(HashMap::new())),
             changelog_topic: Arc::from(config.kafka.changelog_topic.to_string()),
         })
     }
 
-    /// Subscribes to all received document changes, yielding the changed
-    /// document's key.
+    /// Subscribes to document changes to the given id, yielding the new
+    /// state vector.
     #[must_use]
-    pub fn subscribe(&self) -> broadcast::Receiver<Arc<[u8]>> {
-        self.document_changed.subscribe()
+    pub fn subscribe(&self, id: &[u8]) -> NotifyStream {
+        let mut document_states = self.document_updated.lock();
+
+        document_states.get(id).cloned().map_or_else(
+            move || {
+                let notify = Arc::new(Notify::new());
+                document_states.insert(Arc::from(id), notify.clone());
+                NotifyStream::new(notify)
+            },
+            NotifyStream::new,
+        )
     }
 
     /// Pushes an update for a document with the given `id` to the changelog
@@ -298,7 +328,13 @@ impl YrsKafka {
         if let Err(e) = self.rocksdb.merge(id, payload) {
             error!("Failed to update local state: {e}");
         } else {
-            let _res = self.document_changed.send(id.into());
+            let mut document_state = self.document_updated.lock();
+
+            if let Some(subscribers) = document_state.get(id) {
+                subscribers.notify_waiters();
+            } else {
+                document_state.insert(id.into(), Arc::new(Notify::new()));
+            }
         }
 
         Ok(())
