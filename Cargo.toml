@@ -1,7 +1,7 @@
 [package]
 name = "yrs-kafka"
 description = "Yrs synchronization and persistence using RocksDB & Kafka"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "WTFPL"
 repository = "https://github.com/w4/yrs-kafka"
